@@ -123,7 +123,10 @@
     page: 1,
     showingAllRecentCompanies: false,
     filtersCollapsed: false,
-    initialized: false
+    initialized: false,
+    profile: null,
+    profileCompiled: null,
+    profileActive: false
   };
   const elements = {
     totalJobs: document.querySelector('#totalJobs'),
@@ -169,7 +172,144 @@
     recentCompanies: document.querySelector('#recentCompanies'),
     recentCompaniesList: document.querySelector('#recentCompaniesList'),
     recentCompaniesMore: document.querySelector('#recentCompaniesMore'),
+    profileToggle: document.querySelector('#profileToggle'),
+    profileToggleLabel: document.querySelector('#profileToggleLabel'),
+    profileEdit: document.querySelector('#profileEdit'),
+    profileDialog: document.querySelector('#profileDialog'),
+    profileForm: document.querySelector('#profileForm'),
+    profileCargos: document.querySelector('#profileCargos'),
+    profileLocais: document.querySelector('#profileLocais'),
+    profileExcluir: document.querySelector('#profileExcluir'),
+    profileFinanceiro: document.querySelector('#profileFinanceiro'),
+    profileCopyLink: document.querySelector('#profileCopyLink'),
+    profileCancel: document.querySelector('#profileCancel'),
+    profileLinkStatus: document.querySelector('#profileLinkStatus'),
   };
+  const Profile = window.TodasAsVagasProfile;
+
+  function profileStorage() {
+    try { return window.localStorage; } catch { return null; }
+  }
+
+  function setProfile(profile) {
+    state.profile = profile ? Profile.sanitizeProfile(profile) : null;
+    state.profileCompiled = state.profile && !Profile.isProfileEmpty(state.profile)
+      ? Profile.compileProfile(state.profile)
+      : null;
+    if (!state.profileCompiled) state.profileActive = false;
+  }
+
+  // O link pessoal leva o perfil depois do "#", que não é enviado a servidores
+  // nem às métricas de visita. Depois de lido, ele é salvo e retirado do endereço.
+  function initProfile() {
+    if (!Profile) return;
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const fromLink = Profile.profileFromParams(hash);
+    if (fromLink) {
+      Profile.saveProfile(profileStorage(), fromLink);
+      setProfile(fromLink);
+      state.profileActive = Boolean(state.profileCompiled);
+      window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
+      return;
+    }
+    setProfile(Profile.loadProfile(profileStorage()));
+  }
+
+  function jobMatchesProfile(job) {
+    if (!job._profileText) {
+      job._profileText = {
+        title: Profile.normalize(job.title),
+        company: Profile.normalize(job.company),
+        location: Profile.normalize(job.location)
+      };
+    }
+    const text = job._profileText;
+    return Profile.matchesNormalized(text.title, text.company, text.location, state.profileCompiled);
+  }
+
+  function syncProfileUi() {
+    if (!elements.profileToggle) return;
+    elements.profileToggle.setAttribute('aria-pressed', String(state.profileActive));
+    elements.profileToggle.classList.toggle('is-active', state.profileActive);
+    elements.profileToggleLabel.textContent = state.profileActive
+      ? 'Mostrando vagas do meu perfil'
+      : 'Vagas para o meu perfil';
+  }
+
+  function openProfileDialog() {
+    if (!elements.profileDialog) return;
+    const profile = state.profile || Profile.emptyProfile();
+    elements.profileCargos.value = profile.cargos;
+    elements.profileLocais.value = profile.locais;
+    elements.profileExcluir.value = profile.excluir;
+    elements.profileFinanceiro.checked = profile.somenteFinanceiro;
+    elements.profileLinkStatus.textContent = '';
+    if (typeof elements.profileDialog.showModal === 'function') elements.profileDialog.showModal();
+    else elements.profileDialog.setAttribute('open', '');
+    elements.profileCargos.focus();
+  }
+
+  function closeProfileDialog() {
+    if (typeof elements.profileDialog.close === 'function') elements.profileDialog.close();
+    else elements.profileDialog.removeAttribute('open');
+  }
+
+  function profileFromDialog() {
+    return Profile.sanitizeProfile({
+      cargos: elements.profileCargos.value,
+      locais: elements.profileLocais.value,
+      excluir: elements.profileExcluir.value,
+      somenteFinanceiro: elements.profileFinanceiro.checked
+    });
+  }
+
+  function saveProfileFromDialog(event) {
+    event.preventDefault();
+    const profile = profileFromDialog();
+    if (Profile.isProfileEmpty(profile)) {
+      elements.profileLinkStatus.textContent = 'Preencha pelo menos os cargos ou os locais.';
+      return;
+    }
+    const saved = Profile.saveProfile(profileStorage(), profile);
+    setProfile(profile);
+    state.profileActive = true;
+    state.page = 1;
+    closeProfileDialog();
+    render();
+    if (!saved) window.alert('Este navegador não permitiu salvar o perfil. Use o link pessoal para guardá-lo.');
+  }
+
+  async function copyProfileLink() {
+    const profile = profileFromDialog();
+    if (Profile.isProfileEmpty(profile)) {
+      elements.profileLinkStatus.textContent = 'Preencha pelo menos os cargos ou os locais.';
+      return;
+    }
+    const hash = Profile.profileToParams(profile, new URLSearchParams()).toString();
+    const url = `${window.location.origin}${window.location.pathname}#${hash}`;
+    let copied = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        copied = true;
+      }
+    } catch {
+      copied = false;
+    }
+    elements.profileLinkStatus.textContent = copied
+      ? 'Link copiado! Salve nos favoritos do celular ou de outro computador. Não compartilhe: ele contém o seu perfil.'
+      : `Copie este link e salve nos favoritos: ${url}`;
+  }
+
+  function toggleProfile() {
+    if (!state.profileCompiled) {
+      openProfileDialog();
+      return;
+    }
+    state.profileActive = !state.profileActive;
+    state.page = 1;
+    render();
+  }
 
   function normalize(value) {
     return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -599,6 +739,7 @@
     elements.sortFilter.value = params.get('ordem') || 'recent';
     const requestedPage = Number(params.get('pagina'));
     state.page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+    if (params.get('perfil') === '1' && state.profileCompiled) state.profileActive = true;
   }
 
   function updateParams() {
@@ -617,7 +758,8 @@
       pcd: elements.pcdOnly.checked ? '1' : '',
       duplicadas: elements.duplicatesOnly.checked ? '1' : '',
       ordem: elements.sortFilter.value !== 'recent' ? elements.sortFilter.value : '',
-      pagina: state.page > 1 ? String(state.page) : ''
+      pagina: state.page > 1 ? String(state.page) : '',
+      perfil: state.profileActive ? '1' : ''
     };
     for (const [key, value] of Object.entries(values)) {
       if (value) params.set(key, value);
@@ -646,6 +788,7 @@
     }
     if (elements.pcdOnly.checked) add('pcd', 'Inclusão', 'PcD');
     if (elements.duplicatesOnly.checked) add('duplicadas', 'Duplicidade', 'Mais de um portal');
+    if (state.profileActive) add('perfil', 'Filtro', 'Meu perfil');
     return entries;
   }
 
@@ -686,6 +829,7 @@
     if (fields[key]) fields[key].value = '';
     if (key === 'pcd') elements.pcdOnly.checked = false;
     if (key === 'duplicadas') elements.duplicatesOnly.checked = false;
+    if (key === 'perfil') state.profileActive = false;
     state.page = 1;
     render();
   }
@@ -774,6 +918,7 @@
       if (seniority && job.seniority !== seniority) return false;
       if (pcdOnly && !job.pcd) return false;
       if (duplicatesOnly && job.portals <= 1) return false;
+      if (state.profileActive && state.profileCompiled && !jobMatchesProfile(job)) return false;
       if (days) {
         const activity = activityTime(job);
         if (!activity || (now - activity) > days * 86400000) return false;
@@ -1050,11 +1195,13 @@
     elements.pageLabel.textContent = `Página ${numberFormatter.format(state.page)} de ${numberFormatter.format(totalPages)}`;
     updateParams();
     renderActiveFilters();
+    syncProfileUi();
   }
 
   function resetFilters() {
     elements.filtersForm.reset();
     elements.sortFilter.value = 'recent';
+    state.profileActive = false;
     state.page = 1;
     render();
     elements.searchInput.focus();
@@ -1101,6 +1248,11 @@
     elements.sortFilter.addEventListener('change', () => { state.page = 1; render(); });
     elements.clearFilters.addEventListener('click', resetFilters);
     elements.shareSearch?.addEventListener('click', shareSearch);
+    elements.profileToggle?.addEventListener('click', toggleProfile);
+    elements.profileEdit?.addEventListener('click', openProfileDialog);
+    elements.profileForm?.addEventListener('submit', saveProfileFromDialog);
+    elements.profileCancel?.addEventListener('click', closeProfileDialog);
+    elements.profileCopyLink?.addEventListener('click', copyProfileLink);
     elements.downloadCsv.addEventListener('click', downloadCsv);
     elements.retryLoad?.addEventListener('click', () => loadData(true));
     elements.activeFilters?.addEventListener('click', event => {
@@ -1204,6 +1356,8 @@
   }
 
   async function init() {
+    initProfile();
+    syncProfileUi();
     await loadData();
   }
 

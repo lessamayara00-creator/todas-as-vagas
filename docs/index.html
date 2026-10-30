@@ -28,11 +28,12 @@
     <link rel="canonical" href="https://edsonjunioor32.github.io/todas-as-vagas/">
     <link rel="icon" href="./favicon.svg?v=4" type="image/svg+xml">
     <script src="./theme.js?v=2"></script>
-    <link rel="stylesheet" href="./styles.css?v=24">
+    <link rel="stylesheet" href="./styles.css?v=25">
     <link rel="stylesheet" href="./fit-entry.css?v=2">
     <script src="./fit-entry.js?v=1" defer></script>
     <script src="./filter-terms.js?v=1" defer></script>
-    <script src="./app.js?v=19" defer></script>
+    <script src="./profile-filter.js?v=1" defer></script>
+    <script src="./app.js?v=20" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#resultados">Pular para os resultados</a>
@@ -170,6 +171,13 @@
           </div>
 
           <div id="filtersContent">
+          <div class="profile-filter">
+            <button class="profile-toggle" id="profileToggle" type="button" aria-pressed="false">
+              <span aria-hidden="true">★</span> <span id="profileToggleLabel">Vagas para o meu perfil</span>
+            </button>
+            <button class="text-button" id="profileEdit" type="button">Editar meu perfil</button>
+          </div>
+
           <form id="filtersForm" autocomplete="off">
             <div class="field field-search">
               <label for="searchInput">Cargo, empresa ou palavra-chave</label>
@@ -328,6 +336,37 @@
         </p>
       </div>
     </footer>
+
+    <dialog class="profile-dialog" id="profileDialog" aria-labelledby="profileDialogTitle">
+      <form id="profileForm" method="dialog">
+        <h2 id="profileDialogTitle">Meu perfil</h2>
+        <p class="profile-dialog-note">Fica salvo só neste navegador. Separe os termos por vírgula.</p>
+        <label class="profile-field" for="profileCargos">
+          <span>Cargos (a vaga precisa ter pelo menos um destes termos no título)</span>
+          <textarea id="profileCargos" rows="3" spellcheck="false" placeholder="Ex.: gerente, coordenador, carteira pj"></textarea>
+        </label>
+        <label class="profile-field" for="profileLocais">
+          <span>Locais (estados ou cidades)</span>
+          <textarea id="profileLocais" rows="2" spellcheck="false" placeholder="Ex.: sp, são paulo, campinas"></textarea>
+        </label>
+        <label class="profile-field" for="profileExcluir">
+          <span>Não mostrar vagas com estes termos no título</span>
+          <textarea id="profileExcluir" rows="2" spellcheck="false" placeholder="Ex.: estágio, júnior, assistente"></textarea>
+        </label>
+        <label class="check-control" for="profileFinanceiro">
+          <input id="profileFinanceiro" type="checkbox" checked>
+          <span>Somente empresas do setor financeiro (bancos, cooperativas, seguradoras e fintechs)</span>
+        </label>
+        <p class="profile-dialog-note" id="profileLinkStatus" role="status" aria-live="polite"></p>
+        <div class="profile-dialog-actions">
+          <button class="text-button" id="profileCopyLink" type="button">Copiar meu link pessoal</button>
+          <span class="profile-dialog-buttons">
+            <button class="profile-secondary" id="profileCancel" type="button">Cancelar</button>
+            <button class="profile-primary" id="profileSave" type="submit">Salvar e aplicar</button>
+          </span>
+        </div>
+      </form>
+    </dialog>
 
     <noscript>
       <div class="noscript">Ative o JavaScript para pesquisar e filtrar as vagas.</div>
