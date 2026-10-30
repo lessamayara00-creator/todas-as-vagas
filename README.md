@@ -1,3 +1,5 @@
+> 📌 **Sobre esta cópia:** este repositório é um fork de [edsonjunioor32/todas-as-vagas](https://github.com/edsonjunioor32/todas-as-vagas), criado e mantido por [Edson Paiva Jr.](https://github.com/edsonjunioor32) e distribuído sob a licença [Unlicense](LICENSE). Todo o crédito pelo projeto original é do autor. O aviso "OPEN TO WORK" abaixo é dele e foi mantido como no original.
+
 > 🟢 **OPEN TO WORK:** Sou Analista de Suporte N2 Sênior / Sustentação de Sistemas com vasta experiência em Meios de Pagamentos e APIs. Estou em busca de recolocação. [Conecte-se comigo no LinkedIn](https://www.linkedin.com/in/edson-paiva-jr/)
 
 # Todas as vagas — índice multiportal no GitHub Pages
