@@ -21,6 +21,7 @@
     inhire: 'InHire',
     empregare: 'Empregare',
     gupy: 'Gupy',
+    bancos_csv: 'Gupy – bancos e cooperativas',
     solides: 'Sólides',
     petlove: 'Petlove',
     economart: 'Economart',

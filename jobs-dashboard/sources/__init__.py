@@ -57,6 +57,7 @@ from . import (
     workable,
     workable_brazil,
     vagascom,
+    bancos_csv,
 )
 
 REGISTRY = [
@@ -75,6 +76,7 @@ REGISTRY = [
     ("accenture", accenture.fetch),
     ("bradesco", bradesco.fetch),
     ("gupy", gupy.fetch),
+    ("bancos_csv", bancos_csv.fetch),
     ("solides", solides.fetch),
     *recrut_ai.TARGETS,
     ("tagguirh", taggui.fetch),
