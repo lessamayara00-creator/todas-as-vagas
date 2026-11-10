@@ -752,6 +752,10 @@
     "tenantName": "EQI"
   },
   {
+    "slug": "equanimus",
+    "tenantName": "equanimus"
+  },
+  {
     "slug": "erural",
     "tenantName": "erural"
   },
@@ -1546,6 +1550,10 @@
   {
     "slug": "nexaas",
     "tenantName": "Nexaas"
+  },
+  {
+    "slug": "nexforce-trial",
+    "tenantName": "nexforce-trial"
   },
   {
     "slug": "nibo",
