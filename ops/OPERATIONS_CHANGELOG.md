@@ -1,4 +1,167 @@
+## 2026-11-10 — Correção da coleta contínua do LinkedIn e continuidade de catálogo em execuções parciais
+
+- **Integração da PR #187 na `main`:** merged commit `e9ad241` trazendo a injeção mandatória de `geoId=106057199`, orçamento dinâmico na Fase 2 para mitigar timeouts de 45 min no CI e preservação atômica das modalidades históricas em `clear_linkedin_work_models`.
+- **Condição de parada na paginação do LinkedIn (`tools/collect_linkedin.py`):** ajustada a verificação de interrupção para parar apenas em `len(batch) == 0` (ou ausência de novos registros) em vez de abortar prematuramente quando `len(batch) < results_wanted`, garantindo a coleta de snapshots completos mesmo com retornos parciais (< 100) do endpoint guest do LinkedIn.
+- **Continuidade de fontes em coletas parciais (`jobs-dashboard/storage.py` e `pipeline.py`):** implementado suporte a `selected_sources` em `storage.prune` e `storage.export_snapshot`. Em execuções parciais (como `linkedin_refresh`), o corte da Gupy passa a respeitar o `cutoff` recente de 3 dias (em vez de exigir data estritamente de hoje), os feeds corporativos ativos (`ACTIVE_PUBLIC_FEED_SOURCES`) mantêm a isenção de publicação e falhas persistidas em `source_health` são mantidas em `failed_sources`, permitindo que `validate_snapshot.py` aprove o snapshot sem bloquear a publicação no GitHub Pages.
+- **Compatibilidade de testes multiplataforma (`ops/github_scheduler.py` e `test_schedule.py`):** isolamento do módulo Unix `fcntl` com fallback para `msvcrt.locking` no Windows e guarda de verificação de permissão POSIX, permitindo a execução de 100% dos 371 testes unitários (incluindo agendador) em qualquer ambiente (Windows e Linux).
+- **Validação:** 100% de sucesso nos 371 testes unitários do catálogo, agendador e pipeline.
+
+## 2026-11-07 — Otimização e correções estruturais na coleta e persistência do LinkedIn
+
+- **Orçamento dinâmico na Fase 2 (`tools/collect_linkedin.py`):** cálculo de `remaining = MAX_UNIQUE_RESULTS_PER_RUN - len(all_jobs_dict)`. Se `remaining <= 0`, a Fase 2 é pulada sem requisições desnecessárias; se `remaining > 0`, a consulta é estritamente limitada a `min(remaining, JOBSPY_MAX_RESULTS_PER_QUERY)` como limite efetivo, eliminando o download inútil e descarte de centenas de vagas que inflavam a duração do workflow no CI.
+- **Isolamento do parser de candidatura (`_ApplicationCTAParser`):** detecção restrita ao cabeçalho/painel principal (`top-card-layout`, `top-card`, `topcard`) e controles prioritários (`apply-button`, `jobs-apply-button`), com suporte a atributos `value`/`name` para elementos de botão/input e ignorando explicitamente seções de vagas similares e carrosséis no rodapé (`similar-jobs`, `carousel`, `recommended-jobs`, `recommended`, `related-jobs`, `related`), prevenindo falsos positivos e sinais conflitantes.
+- **Injeção de `geoId=106057199` do Brasil:** parâmetros de consulta ao LinkedIn guest recebem obrigatoriamente `geoId="106057199"` em `LinkedIn._search_params` e na sessão resiliente, garantindo que 100% dos resultados pertençam ao Brasil e prevenindo vazamento geográfico internacional.
+- **Suporte e rastreabilidade de Candidatura Simplificada (`f_AL=true`):** adicionada flag `--easy-apply` no coletor e input `easy_apply_only` no workflow `linkedin-jobs.yml`. Quando ativo, JobSpy aplica o filtro nativo `f_AL=true` do LinkedIn e as vagas sem selo individual no HTML recebem proveniência explícita `query_filter_f_AL` e `filter: "easy_apply"` no snapshot, com enriquecimento hierárquico em duplicatas via `APPLICATION_EVIDENCE_PRIORITY`.
+- **Preservação de modalidade histórica (`jobs-dashboard/storage.py`):** `clear_linkedin_work_models(conn, jobs=jobs, target_uids=target_uids)` corrigido para redefinir a modalidade estritamente das vagas fornecidas mesmo quando chamado apenas com `target_uids` ou lista vazia, evitando a limpeza inadvertida de toda a tabela e preservando intactas as modalidades históricas de vagas anteriores válidas do LinkedIn armazenadas no banco.
+- **Validação:** 100% de aprovação na suíte de testes com 92 testes unitários (`test_linkedin.py`, `test_pipeline.py`, `test_preflight_catalog.py`, `test_validate_snapshot.py`).
+
+## 2026-11-07 — Atualização integral após recuperação do runner
+
+- **Execução confirmada:** o agendador da VPS repetiu de forma idempotente o slot pendente (`attempt=2`) após o merge do commit `07dab8c`; o workflow `42317073815` concluiu com sucesso.
+- **Validação do fluxo:** Greenhouse, descoberta/coleta do InHire, consolidação dos portais, validações de integridade, publicação dos snapshots, preservação do histórico e deploy do GitHub Pages passaram sem falha.
+- **Snapshot público conferido:** `generated_at=2026-11-07T01:07:31.591433+00:00`, `82.208` vagas, `64.052` coletadas na execução e `18.156` preservadas. Gupy voltou ao catálogo com `13.717` vagas; LinkedIn ficou com `2.043`, Skeelo com `14` e Heineken com `239`.
+- **Pós-execução:** o runner permaneceu `active/running`, com `6,9 GB` livres (85% de uso) e `_diag` em `139 MB`. O snapshot foi conferido no endpoint público antes de encerrar a recuperação.
+
+## 2026-11-06 — Recuperação do runner self-hosted do catálogo
+
+- **Causa raiz confirmada:** a partição `/` da VPS `serverall` chegou a 100% (45 GB usados, 0 bytes livres). O runner `actions.runner.edsonjunioor32-todas-as-vagas.serverall-vagas` entrou em reinício a cada cinco segundos e falhou com `No space left on device` ao criar o próprio diagnóstico; a etapa de dependências da atualização não chegou à coleta.
+- **Origem do crescimento:** o diretório `/home/ubuntu/actions-runner-todas-vagas/_diag` acumulou 285 arquivos `Runner_*.log` de aproximadamente 25 MB cada, cerca de 4,2 GB no total. Não foram removidos imagens, volumes, bancos, snapshots ou dados de vagas.
+- **Ação operacional:** o serviço do runner do catálogo foi parado somente durante a limpeza, os 285 logs de diagnóstico foram removidos por padrão de nome restrito e o serviço foi iniciado novamente. O filesystem passou a 92% de uso, com cerca de 3,9 GB livres; o processo `Runner.Listener` e um `Runner.Worker` permaneceram ativos após a recuperação.
+- **Validação:** a execução manual `42315018149` (`Execução manual do catálogo`, 23:55 UTC) avançou pelo preparo de dependências e Selenium, mas foi bloqueada pelo teste antigo do LinkedIn antes da coleta. A atualização só deve ser repetida depois da validação CI das correções de teste, sem publicar snapshot parcial.
+- **Risco residual:** a margem de disco ainda exige monitoramento; o runner não deve acumular novamente diagnósticos sem retenção. A limpeza foi limitada aos logs do runner quebrado e é reversível apenas por nova execução/geração de diagnóstico, não por restauração de dados de vagas.
+
+## 2026-11-06 — Bloqueio contra perda silenciosa de fontes em coleta parcial
+
+- **Causa protegida:** execuções parciais, como `LinkedIn-only`, conseguiam publicar um snapshot menor sem declarar que as fontes presentes anteriormente não haviam sido consultadas. Isso podia retirar milhares de vagas de Gupy e de outros portais sem um erro explícito.
+- **Validação implementada:** `validate_snapshot.py` agora compara `source_counts` com o snapshot anterior e bloqueia o publish quando uma fonte desaparece sem `failed_sources` explícito ou sem avanço do respectivo `source_last_success_at`.
+- **Escopo observável:** `pages.yml` registra `CATALOG_COLLECTION_SCOPE=full` em coleta integral e `partial:linkedin` na atualização restrita; o workflow de portais dinâmicos registra `partial:dynamic`.
+- **Regressão coberta:** testes verificam tanto o bloqueio da perda sem confirmação quanto a permissão para uma falha declarada.
+- **Operação:** a atualização pontual deve usar coleta integral; execuções parciais continuam permitidas somente quando a validação confirma a continuidade das demais fontes.
+
+## 2026-11-06 — Correção da modalidade remota do LinkedIn
+
+- **Causa raiz confirmada:** a busca pública guest atual do LinkedIn ignora o filtro legado `f_WT=2`, e o JobSpy usado pelo coletor ignora `is_remote` para essa fonte. Portanto, aquela busca pode devolver vagas presenciais e híbridas. A implementação anterior tratou a consulta como prova de modalidade; em uma coleta, isso marcou falsamente **994 de 1.006** anúncios como remotos.
+- **Remediação:** removidos o monkeypatch que injetava `f_WT=2`, `is_remote` como sinal de classificação e `linkedin_remote_search_filter` da lista de evidências aceitas pelo adaptador. A busca complementar usa `remoto`, `remota`, `remote`, `home office` e `work from home` somente para descobrir candidatos. Cada vaga só recebe modalidade a partir do badge real capturado na página individual, de uma declaração explícita e não ambígua na descrição ou de override manual verificado. A deduplicação só enriquece o anúncio com essas evidências válidas.
+- **Override verificado:** LinkedIn `4484868146`, Desenvolvedor da Mirante Tecnologia, é remoto. A descrição pública da vaga declara “Modalidade: Remota”; o override existe no coletor e como fallback do adaptador para snapshots sem proveniência.
+- **Limitações e risco residual:** palavras-chave podem trazer falsos candidatos, omitir vagas que não usam esses termos e sofrer paginação/rate limit; elas nunca rotulam um anúncio. Quando não houver evidência individual acessível, modalidade fica desconhecida e a vaga continua elegível. Permanecem os limites de 1.000 resultados por consulta e 1.200 anúncios únicos por execução; logo, não há garantia de recuperar todas as remotas.
+- **Publicação de saneamento já confirmada:** o commit `fbccbc22` atualizou o snapshot e o run `42213003518` o publicou às 11:50 UTC. Entre 1.779 anúncios LinkedIn, o catálogo mostra 1 remota (Mirante), 8 presenciais e 1.770 sem modalidade. Dos falsos rótulos, 970 registros foram conciliados com o snapshot anterior (8 presenciais e 962 desconhecidos); 24 sem correspondência ficaram desconhecidos. O código corretivo ainda aguarda assinatura e integração; até lá, uma coleta agendada em `main` pode reintroduzir os rótulos falsos.
+- **Validação:** o snapshot saneado foi publicado e conferido no GitHub Pages. Os testes não foram alterados nem executados neste trabalho. A coleta com a nova regra e sua publicação ainda aguardam integração do código.
+- **Rollback:** antes de qualquer publicação, basta descartar/reverter o branch isolado. Se futuramente integrado, reverter o commit de código e repetir coleta/publicação controladas; não restaurar `f_WT=2` como evidência.
+
 # Histórico operacional e mapa de responsabilidades
+
+## 2026-11-05 — Recuperação independente da coleta do LinkedIn
+
+- **Causa raiz confirmada:** o timer `todas-as-vagas-github-scheduler.timer` da VPS estava ativo e executava a cada cinco minutos, mas `ops/github_scheduler.py` consultava exclusivamente `pages.yml`, cuja agenda é a do catálogo geral (`11, 14, 18 e 23 UTC`). O coletor separado `linkedin-jobs.yml`, agendado para `10 e 22 UTC`, não era observado nem recuperado. Por isso o log podia registrar `slot_succeeded` para o catálogo enquanto não existia uma execução do LinkedIn no slot esperado.
+- **Evidência da ocorrência:** na verificação de 05/11, o último run do LinkedIn era `41951930204` (sucesso, 02:30 UTC); não havia execução correspondente à janela de 10 UTC. O catálogo geral continuava saudável e o `public-data` publicado às 15:20 UTC ainda continha 1.679 vagas LinkedIn, incluindo as 1.000 do snapshot mais recente; o problema era a ausência de uma recuperação específica para a próxima janela, não a remoção dos registros já publicados.
+- **Correção implementada:** o recuperador agora monitora `pages.yml` e `linkedin-jobs.yml` separadamente. O LinkedIn usa os slots `10 e 22 UTC`, histórico de runs de 24 horas para tolerar atraso do GitHub, o endpoint correto de `workflow_dispatch` e o campo privado `linkedin_dispatched_slots`, sem compartilhar tentativas com o catálogo. Mantêm-se o backoff, a janela de visibilidade e o limite de tentativas; commits `[linkedin-refresh]` não são confundidos com uma nova coleta.
+- **Validação:** adicionados testes para o calendário/filtragem do LinkedIn, isolamento do estado, leitura do workflow correto e dispatch do workflow correto. O `py_compile` do scheduler passou; os testes direcionados passaram no Windows. A suíte completa local foi bloqueada por limitações do Python nativo do Windows (`fcntl` ausente e erro de `os.replace` no diretório temporário); a validação final deve ocorrer no runner Linux antes da instalação na VPS.
+- **Implantação e rollback:** após o merge, atualizar o checkout `/home/ubuntu/todas-as-vagas` na VPS e executar uma verificação somente leitura do serviço. Não disparar manualmente lotes extras se o scheduler já registrar a execução do slot. Para reverter, desfazer a alteração de `ops/github_scheduler.py`; o campo `linkedin_dispatched_slots` pode permanecer no estado privado sem afetar a versão anterior.
+
+## 2026-11-04 — Inclusão do portal Heineken
+
+- **Fonte pública:** `https://careers.theheinekencompany.com/Job-Listing`, com os filtros oficiais de Brasil (`field_location_country_code_1=BR` e `operatings_company=289`). A coleta usa somente HTML público, sem Selenium.
+- **Paginação e integridade:** o adaptador segue o `rel=next`/`Show more` (`page=0%2C0%2CN`), com limite defensivo de 100 páginas, validação do host/caminho oficial, deduplicação por `click-id` e fallback para o slug da URL quando o identificador não está disponível. Catálogo vazio ou card incompleto interrompe a fonte para preservar o snapshot anterior.
+- **Dados normalizados:** título, empresa, departamento, URL oficial, cidade, país/mercado `BR`, modalidade identificada por título/localidade e categorias `[departamento, "Heineken"]` sem duplicatas. A listagem não fornece `datePosted` confiável; `published_date` permanece vazio.
+- **Validação e rollback:** os testes isolados da Heineken e do validador dinâmico foram aprovados; a validação live retornou **223 vagas únicas** (o portal informou 224 cards, com a deduplicação evitando uma publicação repetida). A fonte foi registrada no catálogo e no validador dinâmico; repetir com `python jobs-dashboard/validate_dynamic_portals.py --sources heineken`. Para reverter, remover o adaptador e seus registros de catálogo/validador ou reverter a alteração, sem apagar o snapshot anterior.
+
+## 2026-11-04 — Inclusão do portal Skeelo
+
+- **Fonte pública:** `https://skeelo.com/pt/carreiras/#vagas_abertas`, usando o endpoint JSON público `https://skeelo.com/api/ats/jobs?page=N`, sem autenticação.
+- **Paginação e integridade:** o adaptador percorre todas as páginas informadas por `totalPages`, com limite defensivo de 50 páginas, validação de `items` e deduplicação por UUID. Payload inválido, URL fora de `ats.rippling.com/skeelo/jobs/<UUID>` ou catálogo vazio interrompem a fonte para que o snapshot anterior seja preservado pelo fluxo existente.
+- **Dados normalizados:** título, departamento, URL ATS Rippling, cidade, estado, país/mercado, modalidade `remote`, `hybrid` ou `on-site` e categorias `[departamento, "Skeelo"]`. A modalidade remota brasileira sem cidade explícita usa `Brasil` como localidade agregada.
+- **Data de publicação:** a API pública não expõe data de publicação confiável; `published_date` permanece vazio e nenhuma data é inferida.
+- **Integração e validação:** a fonte foi registrada no catálogo e no validador dinâmico. Os testes cobrem paginação, normalização, deduplicação e seleção/registro da fonte; a validação ao vivo deve ser executada com `python jobs-dashboard/validate_dynamic_portals.py --sources skeelo`.
+- **Rollback:** remover o registro de `skeelo` e o adaptador dedicado, ou reverter o commit desta inclusão. Nenhum dado anterior deve ser apagado quando a fonte falhar.
+
+## 2026-11-04 — Cobertura e evidências públicas do LinkedIn
+
+- **Correção do diagnóstico da Dexian:** a captura enviada pelo usuário confirma que a vaga 4479109326 é **Remota** e tem **Candidatura simplificada**. Esses dois dados agora têm overrides documentados para que a evidência fornecida não se perca quando a página pública anônima não expõe o mesmo CTA. O coletor que gerou o snapshot consultado já fazia busca aberta, sem easy_apply=True; portanto, candidatura externa não explica a ausência da vaga. Os IDs 4479867000, 4479109326 e 4484056862 não constavam no snapshot consultado; como não há respostas brutas antigas nem motivos de descarte por anúncio, a causa individual da ausência permanece inconclusiva.
+- **Limite de coleta:** padrão de até **1.000 resultados gerais** e até **1.000 registros brutos na consulta remota complementar**. O teto rígido de **1.200 anúncios únicos** é aplicado somente depois da deduplicação entre consultas; duplicatas não reduzem o saldo para novas vagas. O limite individual do JobSpy 1.4.1 e o teto agregado também valem no modo `--terms` e em `workflow_dispatch`.
+- **Tipo de candidatura por anúncio:** a mesma resposta HTML individual já usada para modalidade é inspecionada nos controles de candidatura. O snapshot registra applicationType (easy_apply, external ou unknown), applicationVerified e applicationEvidence. Easy Apply exige indicador explícito; candidatura externa exige marcador explícito ou CTA com endereço HTTP(S) comprovadamente fora de domínios do LinkedIn. CTA genérico, ausência de dado público ou sinais conflitantes resultam em unknown; nenhum desses casos exclui a vaga.
+- **Modalidade preservada:** somente selo capturado na página individual, declaração textual explícita ou override manual documentado comprovam workplaceType; filtro remoto e campos genéricos do JobSpy permanecem sem valor probatório.
+- **Observabilidade:** cada busca informa limites solicitados/efetivos, resultados retornados, páginas, deduplicação e avisos de teto. O log e GITHUB_STEP_SUMMARY mostram as contagens easy_apply, external e unknown.
+- **Casos de regressão:** testes cobrem Easy Apply explícito, URL externa, CTA genérico, evidência conflitante, vagas unknown mantidas no snapshot, limite de 1.000 por consulta, teto único pós-deduplicação em buscas abertas/com termos e regras existentes de modalidade.
+- **Impacto:** somente a busca e o snapshot auditável do LinkedIn mudam. A classificação de candidatura não é copiada para o catálogo público nem altera o layout do portal; vagas desconhecidas continuam elegíveis. Telegram e WhatsApp seguem consumindo o catálogo compartilhado.
+- **Validação da coleta inicial:** o workflow 41821290704 concluiu com sucesso e publicou snapshot de 902 vagas. Foram 290 registros gerais e 910 brutos remotos, dos quais 288 eram duplicatas. A execução identificou que o código aplicava o saldo único antes da deduplicação e encerrava a busca remota em 910; o PR de correção passa a limitar o total após a deduplicação. Easy Apply: 1; externa: 0; desconhecida: 901, pois a resposta pública anônima não expôs CTA verificável para essas vagas. Os IDs 4479867000, 4479109326 e 4484056862 continuaram ausentes; sua causa individual permanece inconclusiva. A nova coleta após a correção e sua publicação ficam pendentes.
+- **Reversão:** reverter o commit do PR e executar novamente o workflow LinkedIn. O snapshot anterior é preservado se a coleta falhar; a reversão do código restaura a regra e os limites anteriores.
+
+
+
+## 2026-11-04 — Modalidade do LinkedIn somente com selo verificável
+
+- **Causa raiz:** parâmetros de rastreamento e barra final impediam a captura do HTML; uma URL original válida podia autorizar o uso do HTML de um redirecionamento para outra vaga/domínio ou de uma resposta sem URL final; caminho frouxo aceitava rotas adicionais; elementos HTML vazios podiam iniciar ou estender a leitura além do selo. Na falta do selo, a coleta, os inferidores do pipeline e os rótulos persistidos ainda podiam preencher ou conservar modalidades por localização, título, busca remota ou dados antigos.
+- **Correção:** só captura quando a URL final está presente e seu domínio e caminho completo correspondem à vaga; trata tags HTML vazias, inclusive autocontidas, sem permitir que iniciem/estendam o selo e aceita `workplaceVerified` apenas como booleano `true`. Modalidade desconhecida do LinkedIn não é inferida antes nem depois da gravação; em uma coleta LinkedIn bem-sucedida, rótulos antigos são limpos e o snapshot é reaplicado na mesma transação; falhas de gravação revertem a limpeza. Se a coleta falhar, os dados existentes são preservados.
+- **Casos cobertos:** Nortal / (1608) Forward Deployed Engineer deve ser remoto; St Marche / Açougueiro(a) - Vila Mascote deve ser presencial. Vagas sem URL final, redirecionadas para outro domínio/ID, em caminhos que não correspondem exatamente à página da vaga, com selo marcado em elemento HTML vazio ou tag autocontida, com modalidade ausente ou `workplaceVerified: "false"` não herdam modalidade do título, localização ou busca.
+- **Coleta incompleta:** falha em qualquer fase obrigatória cancela a execução antes de gravar o snapshot; assim, a falha não apaga rótulos verificados nem substitui os dados anteriores.
+- **Exceções comprovadas:** Nortal (li-4486898930) remoto e St Marche (li-4478138443) presencial, conforme capturas do LinkedIn fornecidas em 03/11/2026. Os demais anúncios sem selo na resposta pública anônima permanecem sem modalidade.
+- **Impacto:** a coleta LinkedIn e a publicação do catálogo continuam no fluxo existente. Vagas sem modalidade verificável permanecem no portal, mas sem rótulo de modalidade; filtros de modalidade não as tratam como remoto, híbrido ou presencial. Telegram e WhatsApp continuam consumindo o mesmo catálogo, sem mudança em seus publicadores.
+- **Validação local:** 22 testes do LinkedIn e 36 testes do pipeline aprovados. CI do commit atualizado e nova coleta/publicação ainda pendentes.
+- **Pós-implantação:** conferir `li-4486898930` como remoto e `li-4478138443` como presencial no snapshot do LinkedIn, no `public-data/data/vagas.json` e no GitHub Pages; confirmar que vagas não verificadas aparecem sem chip de modalidade.
+- **Reversão:** reverter o commit desta correção e executar novamente a coleta/publicação. Isso restaura a classificação anterior por heurística e pode reintroduzir rótulos incorretos.
+
+
+## 2026-11-03 — Modalidade do LinkedIn validada na página individual
+
+- **Diagnóstico original, retificado em 2026-11-06:** o filtro remoto legado (`f_WT=2`) não é uma fonte confiável de candidatos remotos: a busca guest atual o ignora. O cartão de busca também não basta para classificar modalidade; o dado deve vir do selo real da página individual, de descrição explícita ou de override verificado.
+- **Correção então implementada e ainda válida:** o coletor abre a página de detalhes durante a coleta, lê o selo Remote, Hybrid ou On-site/Presencial e marca a evidência por anúncio. A estratégia de descoberta atualmente vigente é a busca por palavras de modalidade documentada no registro de 2026-11-06; nem os termos nem o filtro legado comprovam modalidade.
+- **Proteção:** buscas por palavras-chave servem apenas para descoberta; vagas sem selo ou descrição explícita permanecem sem modalidade, exceto overrides manuais verificados. A suíte mantém regressões para Nortal, St Marche e backfill.
+- **Validação:** o snapshot continua sem publicar a descrição completa das vagas; somente o modelo de trabalho verificado é incorporado ao catálogo.
+
+## 2026-11-03 — Catálogo integral sem restrição por termos
+
+- **Regra consolidada:** o portal Todas as Vagas deve reunir as vagas públicas retornadas pelos adaptadores registrados, mantendo somente validações de publicação, localização, prazo e janela de até dois meses. Termos de cargo não são critério de inclusão.
+- **Causa da regressão:** o índice amplo público da Gupy é limitado a aproximadamente 10.000 resultados; as buscas complementares por termos eram apenas uma expansão parcial e deixavam fora anúncios antigos ativos cujo título não correspondia aos termos.
+- **Correção:** a consulta ampla continua sendo a fonte autoritativa e nunca é filtrada por termos; as consultas complementares permanecem aditivas. A página pública `https://carreirasomie.gupy.io/` foi incluída na reconciliação por portal, cobrindo a vaga Gupy `12711932` e evitando depender apenas de termos.
+- **Outros portais:** a auditoria não encontrou filtro global de título no pipeline. Vagas.com remove `q=buscar` durante a paginação; filtros geográficos em SmartRecruiters/UnlockCareer e o modo padrão aberto do LinkedIn não são filtros de cargo.
+- **Proteções:** teste de regressão para Omie e para um título fora da lista de buscas complementares; documentação no README e no mapa do ecossistema. A publicação só deve ser considerada concluída após validar o novo `public-data/data/vagas.json` e o GitHub Pages.
+- **Limitação conhecida:** a Gupy ainda não oferece, por esse MCP público, uma exportação integral sem paginação/limite do provedor. Novas páginas públicas relevantes devem ser adicionadas ao manifesto monitorado até existir um enumerador oficial completo.
+## 2026-10-31 — Resiliência, Backoff HTTP 429 e Benchmark da Coleta Aberta no LinkedIn
+
+- **Benchmark Isolado na `main` (commit `a18798c`):**
+  - **Início/Fim (UTC):** 2026-10-31 20:41:17 UTC a 20:41:56 UTC (duração total: 38.85s).
+  - **Tráfego HTTP:** 9 requisições para a API pública de busca (`seeMoreJobPostings/search`).
+  - **Rate Limits Observados:** 1 ocorrência de HTTP 429 na 4ª página (`start=30`) da Fase 1, causada pelo intervalo agressivo padrão do JobSpy (~0.4s).
+  - **Volume e Integridade:** 80 registros brutos obtidos; 30 duplicatas descartadas; 50 vagas únicas consolidadas.
+  - **Validação:** 50 de 50 vagas aprovadas pelo normalizador oficial `sources.linkedin._normalize` (100% de taxa de validação sem rejeições).
+  - **Distribuição:** 28 vagas presenciais (`on-site`) e 22 vagas remotas (`remote`).
+- **Atraso Adaptativo e Tratamento Resiliente de HTTP 429:**
+  - `tools/collect_linkedin.py` configurado com `LinkedIn.delay = (2.5, 3.0)` para espaçamento seguro entre páginas.
+  - Implementado interceptador de sessão em `jobspy.linkedin.create_session` que captura respostas HTTP 429 e aplica backoff exponencial (5s, 10s, 20s) ou o valor do cabeçalho `Retry-After`, com até 3 tentativas automáticas de recuperação.
+  - Caso o rate limit persista após as tentativas, a rotina interrompe a paginação com aviso seguro preservando integralmente todas as vagas já coletadas, impedindo a perda de lotes parciais.
+- **Integração de Agendas e Publicação:**
+  - A rotina de coleta permanece isolada em `.github/workflows/linkedin-jobs.yml` com disparo automático diário às 10:00 UTC (`0 10 * * *`) e manual via `workflow_dispatch`.
+  - A publicação oficial no catálogo e GitHub Pages é acionada automaticamente por `.github/workflows/pages.yml` ao detectar o commit `[linkedin-refresh]`, garantindo publicação única sem duplicação de cron/agendas.
+- **Testes Automatizados:**
+  - `jobs-dashboard/tests/test_linkedin.py` expandido com `test_jobspy_adaptive_delay_and_429_backoff_handling`, totalizando 11 testes unitários aprovados com sucesso.
+
+## 2026-10-31 — Coleta aberta e não-restritiva no LinkedIn para o Todas as Vagas (histórico retificado em 2026-11-06)
+
+- **Alinhamento e Estratégia Aberta:** Seguindo diretriz do usuário e alinhamento com `@codex` no agent-bus, o coletor deixou de depender de listas fixas de termos de busca. Como o "Todas as Vagas" é um portal amplo e generalista, consultas restritas a palavras-chave específicas de suporte/dev foram substituídas pela busca aberta nacional (`keywords=None`).
+- **Estratégia histórica de coleta:**
+  - **Fase 1 (Varredura Aberta Geral):** Consulta ampla em todo o Brasil com Easy Apply ativo e janela de 30 dias, trazendo vagas presenciais de múltiplas cidades, vagas híbridas e vagas com escopo nacional em diversas áreas de atuação (Direito, Design, Operações, Engenharia, Finanças, etc.).
+  - **Fase 2 original, invalidada:** aplicava `f_WT=2` via patch no JobSpy e tratava os resultados como busca remota. A verificação de 2026-11-06 confirmou que o endpoint guest ignora esse filtro; ele não garante resultados remotos nem é evidência de modalidade.
+  - Termos de busca (`--terms`) foram mantidos como filtro opcional via CLI apenas para testes direcionados ou execuções manuais.
+- **Workflow e Parâmetros:** O workflow `.github/workflows/linkedin-jobs.yml` foi atualizado para utilizar o parâmetro `results_limit` (padrão 100 vagas na busca geral).
+- **Teste histórico substituído:** `test_collect_linkedin_open_unrestricted_collection` originalmente assumia que a busca com `is_remote=True` retornava apenas remotas. A revisão de 2026-11-06 troca essa premissa por busca de candidatos via palavras e exige evidência individual para classificar.
+
+## 2026-10-31 — Estratégia antiga de modalidade remota do LinkedIn (invalidada em 2026-11-06)
+
+- **Diagnóstico e implementação originais, ambos retificados:** o pipeline interpretava localização nacional como sinal de modalidade e adicionava `f_WT=2` ao JobSpy. A busca guest atual ignora o filtro; a localização `Brazil`/`Brasil` também não prova que a vaga seja remota.
+- **Status:** o patch de `LinkedIn._search_params`, a classificação baseada em `is_remote=True` e a inferência por localização foram removidos. A política vigente está na entrada de 2026-11-06: palavras de modalidade servem apenas para descobrir candidatos e nunca autorizam `workplaceType`.
+- **Expansão de termos e limite seguro:** O limite seguro por termo foi ampliado para 25 no workflow e script. A lista de termos foi expandida para incluir papéis de suporte avançado, operações e atendimento ("Operations Assistant", "Assistente de Operações", "Suporte de Aplicação", "Help Desk").
+- **Normalização então publicada, agora supersedida:** localizações `Brazil`/`Brasil` e a participação na etapa remota chegaram a ser usadas para marcar `remote`; essa regra era incorreta. Hoje esses registros ficam sem modalidade até haver evidência verificável por anúncio.
+- **Testes de regressão:** A suíte em `jobs-dashboard/tests/test_linkedin.py` foi expandida com 9 testes, incluindo validação específica para localização "Brazil", aceitação de URLs de subdomínio local (`br.linkedin.com`), normalização de modelo de trabalho e teste de regressão direto para a vaga ID `4483475105` (Tryp.com, Operations Assistant).
+- **Validação de snapshot:** O snapshot `docs/data/linkedin_vagas.json` foi atualizado e reprocessado: o adaptador `sources.linkedin.fetch()` validou 77 vagas aprovadas no filtro de 30 dias, incluindo 8 vagas remotas e a vaga ID `4483475105`.
+
+## 2026-10-31 — LinkedIn incorporado ao catálogo principal
+
+- A execução isolada [#41215702332](https://github.com/edsonjunioor32/todas-as-vagas/actions/runs/41215702332) concluiu com sucesso e coletou 79 vagas públicas com Candidatura Simplificada. A execução anterior usava a janela de 60 dias e publicava somente `docs/data/linkedin_vagas.json`; portanto, esse sucesso não significava alimentação do portal.
+- O novo adaptador `jobs-dashboard/sources/linkedin.py` valida schema, origem, Easy Apply, link oficial `linkedin.com/jobs/view/<id>`, localidade brasileira, data máxima de 30 dias e frescor do snapshot. Vagas inválidas, antigas, fora do Brasil ou sem candidatura simplificada são descartadas; descrições não são copiadas.
+- O workflow agora usa 720 horas (30 dias), recusa snapshots vazios e valida o arquivo antes de gravá-lo. O commit recebe `[linkedin-refresh]`, marcador reconhecido pelo `pages.yml` para executar a rotina principal completa: histórico, deduplicação, validações, `public-data` e GitHub Pages.
+- O snapshot é mantido como entrada intermediária pública, mas a fonte efetiva do portal é o mesmo pipeline das demais origens. Se a coleta falhar, estiver vazia ou ficar desatualizada, ela não sobrescreve o último resultado válido e não bloqueia as outras fontes.
+- A rotina continua sem serviço pago, sem login, cookies ou segredo do LinkedIn. A verificação automatizada do adaptador cobre janela, país, Easy Apply, normalização e expiração do snapshot.
+- O PR [#170](https://github.com/edsonjunioor32/todas-as-vagas/pull/170) foi mesclado no commit `206ad05fd778b8279c3f5a1f3172e7e5d02768d3`. A verificação integrada [#41227356272](https://github.com/edsonjunioor32/todas-as-vagas/actions/runs/41227356272) terminou com sucesso: o LinkedIn entrou com **76 vagas** após a validação de 30 dias, o catálogo consolidou **82.262 vagas** e o ramo `public-data` avançou para `ca2c673`. Os gates de privacidade, preflight, histórico e GitHub Pages passaram.
 
 ## 2026-10-29 — Inclusão do portal Gateware
 
@@ -72,6 +235,7 @@ Escopo: 173 arquivos rastreados da branch `main` nesta revisão, incluindo `AGEN
 - `.github/workflows/catalog-catchup.yml` — vigia atrasos e despacha recuperação do catálogo.
 - `.github/workflows/catalog-ci.yml` — validação sem publicação em PRs filtrados ou manualmente.
 - `.github/workflows/fit-ci.yml` — testes e preview do analisador; verifica a entrada pública e dispara quando o CTA ou estilo do portal muda.
+- `.github/workflows/linkedin-jobs.yml` — coleta diária pública do LinkedIn Easy Apply e validação do snapshot intermediário.
 - `.github/workflows/mercado-livre-isolated.yml` — validação isolada do coletor Mercado Livre.
 - `.github/workflows/merge-dynamic-portals.yml` — mesclagem controlada de portais dinâmicos.
 - `.github/workflows/pages.yml` — coleta em quatro horários diários e um horário semanal Greenhouse, acionamento manual/recuperação e deploy de interface em push; push comum pode publicar apenas a interface.
@@ -165,6 +329,7 @@ O registro de adaptadores fica em `jobs-dashboard/sources/__init__.py`. Cada mó
 - `jobs-dashboard/sources/jobii.py` — vagas Jobii.
 - `jobs-dashboard/sources/journy.py` — vagas Journy.
 - `jobs-dashboard/sources/levva.py` — vagas Levva.
+- `jobs-dashboard/sources/linkedin.py` — valida e adapta o snapshot público do LinkedIn para o pipeline principal.
 - `jobs-dashboard/sources/mercadolivre.py` — vagas Mercado Livre.
 - `jobs-dashboard/sources/nerdin.py` — vagas Nerdin.
 - `jobs-dashboard/sources/ngcash.py` — vagas NG.CASH.
@@ -199,6 +364,13 @@ O registro de adaptadores fica em `jobs-dashboard/sources/__init__.py`. Cada mó
 - `jobs-dashboard/sources/workable_brazil.py` — busca Workable no Brasil.
 - `jobs-dashboard/sources/wwr.py` — vagas We Work Remotely.
 
+## 2026-11-05 — Inclusão do quadro Positivo S+ na Pandapé
+
+- O adaptador existente de quadros Pandapé em `jobs-dashboard/sources/requested_portals_03092026.py` foi generalizado para aceitar mais de uma URL, empresa e identificador de fonte.
+- O quadro público `https://positivosmais.pandape.infojobs.com.br/` foi registrado como `positivosmais`, com empresa `Positivo S+`, links oficiais `/Detail/<id>`, localidade e modalidade preservadas. O texto em inglês `Presential` é normalizado para presencial (`on-site`).
+- A fonte usa o mesmo navegador renderizado do coletor Pandapé/Minsait e fica isolada das falhas dos demais portais. Ela entra no registro regular e na mesclagem dinâmica, portanto uma falha desse quadro preserva o último estado válido sem bloquear os outros.
+- A fonte foi incluída na lista de quadros ativos e no rótulo das mensagens do Telegram; não houve mudança no esquema público nem nos consumidores site, Telegram, WhatsApp ou agente.
+
 ### Testes do coletor
 
 Todos os arquivos desta seção são testes automatizados; não são coletores nem devem ser agendados como fontes.
@@ -211,6 +383,7 @@ Todos os arquivos desta seção são testes automatizados; não são coletores n
 - `jobs-dashboard/tests/test_fit_requirements.py` — extração de requisitos.
 - `jobs-dashboard/tests/test_gupy.py` — fonte Gupy.
 - `jobs-dashboard/tests/test_homepage_cta_styles.py` — CTAs da página inicial.
+- `jobs-dashboard/tests/test_linkedin.py` — contrato do snapshot LinkedIn, janela de 30 dias e rejeição de dados inválidos.
 - `jobs-dashboard/tests/test_mercadolivre.py` — fonte Mercado Livre.
 - `jobs-dashboard/tests/test_merge_dynamic_portals.py` — mesclagem dinâmica.
 - `jobs-dashboard/tests/test_new_sources.py` — fontes recém-incorporadas.
@@ -315,3 +488,54 @@ Todos os arquivos desta seção são testes automatizados; não são coletores n
 - O monitor e o workflow passaram a aceitar somente `[catalog-refresh:run]` para uma coleta acionada por push.
 - O texto genérico `[catalog-refresh]` não aciona mais coleta, evitando que mensagens de changelog ou commits de manutenção gerem uma execução extra.
 - Foi adicionado teste negativo para garantir que texto não marcado não seja classificado como coleta.
+
+
+## 2026-11-03 — Diagnóstico de portais indisponíveis e alerta após 24 horas
+
+### Evidência da execução
+
+A execução completa [41707136337](https://github.com/edsonjunioor32/todas-as-vagas/actions/runs/41707136337) concluiu a publicação do catálogo, mas registrou falha ou indisponibilidade nos portais abaixo. O catálogo não foi substituído por uma fotografia parcial: fontes saudáveis foram publicadas e os últimos dados válidos das fontes indisponíveis permaneceram protegidos pelas regras existentes.
+
+| Portal | Evidência observada | Classificação / consequência |
+|---|---|---|
+| ASA | O adaptador Selenium do Elevo+ terminou com mensagem vazia ('Message:'); ele não encontrou uma listagem pública utilizável no diagnóstico registrado. | Falha de renderização/diagnóstico insuficiente; dados anteriores preservados. |
+| Assefaz | Está em PAUSED_SOURCES; não foi chamado nesta execução. | Pausa operacional explícita; dados anteriores preservados. |
+| Atitude | Está em PAUSED_SOURCES; não foi chamado nesta execução. | Pausa operacional explícita; dados anteriores preservados. |
+| Azify | Está em PAUSED_SOURCES; não foi chamado nesta execução. | Pausa operacional explícita; dados anteriores preservados. |
+| By Moma Group | Tenant Quickin: nenhum link público de vaga após a renderização JavaScript (137,0 s). | Falha do catálogo público/renderizado; dados anteriores preservados. |
+| Cprocco | Está em PAUSED_SOURCES; não foi chamado nesta execução. | Pausa operacional explícita; dados anteriores preservados. |
+| Entera | Convagas retornou zero registros públicos (2,2 s). | Feed vazio/endpoint público sem registros; não tratado como catálogo saudável. |
+| Greenhouse | Três boards falharam, mas os boards 1910genetics, abarca e actpowerservices concluíram; 1.339 vagas Greenhouse foram mantidas. | Falha parcial isolada; resultado saudável preservado e parcial publicado. |
+| Grupo EPA | Tenant Quickin aguardou 91,4 s por uma vaga de navegador renderizado. | Contenção/timeout da capacidade compartilhada de Chromium. |
+| Harpia IT | Compleo teve 1 de 36 detalhes com HTTP 404; 23 vagas foram consolidadas. | Falha parcial de detalhe; listagem bem-sucedida mantida. |
+| Inlog | Retornou zero vagas; o pipeline marcou a fonte como falha e preservou o snapshot anterior. | Feed vazio ou contrato público alterado; não apagar histórico. |
+| Jobi-Hub | Tenant Quickin não expôs links públicos após JavaScript (123,5 s). | Falha do catálogo público/renderizado; dados anteriores preservados. |
+| Koria | Tenant Quickin aguardou 90,9 s por slot de navegador renderizado. | Contenção/timeout da capacidade compartilhada de Chromium. |
+| Metris DHO | Tenant Quickin não expôs links públicos após JavaScript (147,2 s). | Falha do catálogo público/renderizado; dados anteriores preservados. |
+| Prolog App | Tenant Quickin aguardou 91,7 s por slot de navegador renderizado. | Contenção/timeout da capacidade compartilhada de Chromium. |
+| R2 Ventures | Tenant Quickin não expôs links públicos após JavaScript (135,7 s). | Falha do catálogo público/renderizado; dados anteriores preservados. |
+| VOE RH | Tenant Quickin não expôs links públicos após JavaScript (136,7 s). | Falha do catálogo público/renderizado; dados anteriores preservados. |
+| Wellfound | O adaptador não encontrou vagas reconhecíveis (44,7 s). | Mudança/ausência do formato público reconhecido; dados anteriores preservados. |
+
+### Causa comum e limites da conclusão
+
+Os registros mostram quatro classes diferentes, e não uma falha única da VPS: (1) quatro fontes pausadas intencionalmente; (2) saturação/timeout do pool de Chromium; (3) páginas JavaScript que não entregaram links no DOM público esperado; e (4) feeds vazios ou respostas parciais. Portanto, aumentar retries indiscriminadamente não corrige todos os casos e pode piorar a contenção do navegador. Greenhouse e Harpia IT comprovam que o pipeline isola falhas de sub-board/detalhe sem descartar as vagas válidas.
+
+### Alteração do alerta de saúde
+
+Antes, docs/app.js mostrava a mensagem sempre que failed_sources não estava vazia. O campo fresh_days=3 não representava 72 horas de falha; ele pertencia à seleção de linhas recentes, e a exceção de fonte falha também protege o histórico até a janela normal de publicação.
+
+A partir desta alteração:
+
+- o banco histórico mantém source_health com last_success_at e failure_started_at;
+- o pipeline completo e a mesclagem parcial atualizam esse estado sem alterar a retenção das vagas;
+- o snapshot publica source_warning_after_hours=24 e os timestamps sanitizados por portal;
+- a interface só apresenta “Alguns portais não responderam...” para a fonte cuja última atualização bem-sucedida (ou início da falha, quando não há sucesso anterior) esteja há pelo menos 24 horas;
+- fontes pausadas também entram no mesmo relógio, sem serem reativadas automaticamente;
+- a frase sobre preservação por até três dias continua relacionada à tolerância de dados recentes; ela não é mais usada para decidir quando o alerta aparece.
+
+Essa separação evita alertas falsos imediatamente após uma falha transitória e evita esconder por vários dias uma fonte que permaneceu sem atualização. A mudança não altera a cadência da coleta, os limites do navegador, a janela de dois meses nem a política de preservação.
+
+### Validação obrigatória
+
+Foram adicionados testes para preservar o primeiro instante da falha, atualizar o sucesso e exportar os metadados de 24 horas. O teste de interface verifica que o alerta usa sourceWarningSources(data) e source_warning_after_hours, em vez de testar apenas a presença da lista de falhas.

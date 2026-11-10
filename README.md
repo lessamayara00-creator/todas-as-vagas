@@ -60,11 +60,20 @@ Assim, o catálogo permanece em um único ponto de verdade: uma atualização be
 ## Portais incluídos
 
 - Brasil: **InHire, Empregare, Gupy, Sólides, Recrut.AI, Taggui RH, GeekHunter, Nerdin e InfoJobs**;
-- globais: **The Muse, Remotive, Jobicy, Remote OK, Himalayas, Working Nomads, Arbeitnow e We Work Remotely**;
+- globais: **The Muse, Remotive, Jobicy, Remote OK, Himalayas, Working Nomads, Arbeitnow e We Work Remotely**;\n- busca pública especializada: **LinkedIn**, incluindo vagas com todos os tipos públicos de candidatura;
 - páginas públicas de empresas: **Stone, iFood, PicPay, Banco Original, Braskem, GM Financial, Dell Technologies, ArcelorMittal, Grupo Mateus, AutoZone, NOV, Arcor Brasil, Greenhouse Brasil, Lever e Ashby**.
 
 O painel permite combinar pesquisa livre com filtros de cidade, portal, modalidade, mercado, área, senioridade, data, vagas afirmativas para PcD e oportunidades encontradas em mais de um portal. O campo de cidade oferece sugestões a partir das localidades presentes na base e também aceita digitação livre. A exportação CSV respeita os filtros selecionados. O botão de tema no cabeçalho alterna entre os modos claro e escuro, salva a escolha no navegador e, na primeira visita, respeita a preferência do sistema.
 
+## LinkedIn — vagas públicas
+
+O workflow [`linkedin-jobs.yml`](.github/workflows/linkedin-jobs.yml) consulta duas vezes ao dia as listagens públicas do LinkedIn, sem login, cookies ou credenciais de uma conta. A coleta busca vagas públicas no Brasil sem restringir o tipo de candidatura e aplica uma janela de **60 dias**. O padrão solicita até **1.000 resultados gerais** e permite que a busca remota complementar consulte até **1.000 anúncios brutos**. Depois da deduplicação entre as consultas, a execução guarda no máximo **1.200 anúncios únicos**; duplicatas não consomem esse teto. O mesmo limite individual vale para cada consulta no modo com termos. A quantidade final pode ficar abaixo de 1.200 quando a fonte retornar menos vagas únicas, e o resumo informa resultados, duplicatas e os limites aplicados.
+
+A modalidade é marcada somente quando há selo capturado na página individual do LinkedIn, uma declaração explícita e inequívoca na descrição ou um dos casos manuais documentados. Se não houver evidência suficiente, o portal mantém a vaga e mostra a modalidade como não informada. O filtro remoto serve apenas para ampliar a descoberta e não determina a modalidade. Para cada anúncio, o snapshot registra `applicationType` (`easy_apply`, `external` ou `unknown`), `applicationVerified` e `applicationEvidence`: candidatura simplificada exige CTA explícito; candidatura externa exige marcador explícito ou CTA com link externo verificável. Texto genérico “Candidatar-se/Apply”, sinais conflitantes ou ausência de evidência ficam como `unknown`, sem excluir a vaga. A captura enviada pelo usuário registra a vaga Dexian 4479109326 como Easy Apply e remota. Esses campos servem para auditoria e não mudam o layout do portal.
+
+O resultado é gravado em `docs/data/linkedin_vagas.json`, validado antes do commit e então incorporado ao mesmo pipeline do catálogo. O commit recebe o marcador `[linkedin-refresh]`; esse marcador faz o `pages.yml` executar a coleta completa, a deduplicação, as validações, o histórico, o snapshot `public-data` e o GitHub Pages. Assim, o LinkedIn não publica um arquivo paralelo que fique fora do portal.
+
+A fonte publica somente metadados e o link oficial da vaga. Descrições completas não entram no snapshot. Se o LinkedIn estiver indisponível, o snapshot estiver vazio ou ficar desatualizado, a etapa é interrompida sem substituir os dados válidos anteriores; as demais fontes continuam seguindo a agenda normal.
 ## Gupy via MCP público de candidatos
 
 A coleta da Gupy usa o servidor MCP público de candidatos (`search_jobs` e, nas páginas monitoradas, `get_job_by_id`), sem credencial de recrutador. A consulta ampla percorre até 10.000 resultados por execução; buscas complementares por termos de diferentes áreas podem acrescentar até cinco páginas de 100 resultados por termo. Isso respeita o limite de paginação do MCP, mas não representa uma exportação integral das aproximadamente 82 mil oportunidades que o índice reporta. A coleta remove bancos de talentos e páginas confidenciais, exige data de publicação dentro de dois meses e descarta prazos já expirados. Como o MCP pode informar o total apenas como o tamanho da página, o coletor continua a paginação enquanto as páginas vierem completas. Em caso de rate limit ou indisponibilidade, somente a Gupy é marcada como falha e seu cache antigo não é exibido como atual; as outras fontes seguem normalmente.
@@ -80,6 +89,8 @@ A página geral da Taggui RH é coletada separadamente. Links incompletos termin
 A GeekHunter é consultada pelas páginas públicas de vagas, que já entregam dados estruturados no HTML. O adaptador percorre todas as páginas disponíveis, normaliza modalidade, localização, senioridade, remuneração e tecnologias e não publica a descrição integral.
 
 O InfoJobs é consultado pela busca pública geral, ordenada pelas mais recentes. A integração percorre a paginação pública até o limite configurado, preserva as modalidades indicadas em cada anúncio e deixa o filtro global de dois meses remover vagas antigas. Como o portal exige JavaScript e protege requisições HTTP simples com WAF, a atualização usa o Chrome já disponível no executor do GitHub Actions, sem login e sem acessar dados de candidatos. Os limites podem ser ajustados por `INFOJOBS_MAX_JOBS` e `INFOJOBS_MAX_SCROLLS`.
+
+O quadro **Positivo S+** é coletado separadamente pelo board público da Pandapé (`positivosmais.pandape.infojobs.com.br`). Como a listagem é carregada por JavaScript, o adaptador usa o navegador renderizado do executor, percorre as vagas públicas exibidas pelo quadro e mantém a empresa como o portal `positivosmais`, sem misturá-la à busca geral do InfoJobs.
 
 ## Stone e iFood
 

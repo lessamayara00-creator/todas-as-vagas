@@ -1,6 +1,7 @@
 name: Atualizar vagas multiportal e publicar GitHub Pages
+# O evento linkedin_refresh consolida apenas o snapshot do LinkedIn já coletado.
 run-name: >-
-  ${{ github.event_name == 'repository_dispatch' && github.event.action == 'catalog_recovery' && 'Recuperação automática do catálogo' || github.event_name == 'workflow_dispatch' && format('Execução manual do catálogo {0}', inputs.resume_key) || 'Atualização programada do catálogo' }}
+  ${{ github.event_name == 'repository_dispatch' && github.event.action == 'linkedin_refresh' && 'Publicação após coleta do LinkedIn' || github.event_name == 'repository_dispatch' && github.event.action == 'catalog_recovery' && 'Recuperação automática do catálogo' || github.event_name == 'workflow_dispatch' && format('Execução manual do catálogo {0}', inputs.resume_key) || 'Atualização programada do catálogo' }}
 
 on:
   push:
@@ -18,8 +19,13 @@ on:
         description: "Identificador da coleta anterior a ser retomada"
         required: false
         type: string
+      publish_linkedin_only:
+        description: "Publicar o snapshot do LinkedIn sem coletar os demais portais"
+        required: false
+        default: false
+        type: boolean
   repository_dispatch:
-    types: [catalog_recovery]
+    types: [catalog_recovery, linkedin_refresh]
   schedule:
     # GitHub Actions usa UTC; Brasília/Fortaleza permanece em UTC-3.
     # Equivale a 08h07, 11h07, 15h07 e 20h07 em Brasília/Fortaleza.
@@ -42,7 +48,7 @@ concurrency:
 
 jobs:
   publicar-interface:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && !contains(github.event.head_commit.message, '[refresh-fit]') && !contains(github.event.head_commit.message, '[isolated]') && !contains(github.event.head_commit.message, '[catalog-refresh:run]')
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && !contains(github.event.head_commit.message, '[refresh-fit]') && !contains(github.event.head_commit.message, '[isolated]') && !contains(github.event.head_commit.message, '[catalog-refresh:run]') && !contains(github.event.head_commit.message, '[linkedin-refresh]')
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     environment:
@@ -53,7 +59,8 @@ jobs:
       - name: Baixar o repositório
         uses: actions/checkout@v4
         with:
-          ref: main
+          # Usa exatamente o commit que disparou a execução; não a ponta móvel de main.
+          ref: ${{ github.sha }}
 
       - name: Restaurar snapshots públicos
         shell: bash
@@ -107,7 +114,7 @@ jobs:
           artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
 
   atualizar-e-publicar:
-    if: github.ref == 'refs/heads/main' && (github.event_name != 'push' || ((contains(github.event.head_commit.message, '[refresh-fit]') || contains(github.event.head_commit.message, '[catalog-refresh:run]')) && !contains(github.event.head_commit.message, '[isolated]')))
+    if: (github.ref == 'refs/heads/main' || github.event_name == 'repository_dispatch') && (github.event_name != 'push' || ((contains(github.event.head_commit.message, '[refresh-fit]') || contains(github.event.head_commit.message, '[catalog-refresh:run]') || contains(github.event.head_commit.message, '[linkedin-refresh]')) && !contains(github.event.head_commit.message, '[isolated]')))
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     environment:
@@ -118,7 +125,7 @@ jobs:
       - name: Baixar o repositório
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           # Só usamos a ponta atual do código; o histórico completo inclui versões antigas de jobs.db e excede o disco do runner.
           fetch-depth: 1
       
@@ -262,12 +269,12 @@ jobs:
         run: python jobs-dashboard/preflight_catalog.py --mode before-collection --snapshot .previous-vagas.json
 
       - name: Atualizar catálogo brasileiro da Greenhouse
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '43 7 * * 0'
+        if: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '43 7 * * 0') && !((github.event_name == 'workflow_dispatch' && inputs.publish_linkedin_only) || (github.event_name == 'repository_dispatch' && github.event.action == 'linkedin_refresh')) }}
         continue-on-error: true
         run: python jobs-dashboard/discover_greenhouse_br.py --workers 6 --timeout 12
 
       - name: Descobrir novas empresas InHire
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[refresh-fit]'))
+        if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[refresh-fit]'))) && !((github.event_name == 'workflow_dispatch' && inputs.publish_linkedin_only) || (github.event_name == 'repository_dispatch' && github.event.action == 'linkedin_refresh')) }}
         continue-on-error: true
         env:
           INHIRE_URLSCAN_PAGES: "20"
@@ -283,6 +290,7 @@ jobs:
             inhire-details-v1-
 
       - name: Coletar a InHire
+        if: ${{ !((github.event_name == 'workflow_dispatch' && inputs.publish_linkedin_only) || (github.event_name == 'repository_dispatch' && github.event.action == 'linkedin_refresh')) }}
         continue-on-error: true
         env:
           INHIRE_DETAIL_TTL_HOURS: "24"
@@ -290,6 +298,7 @@ jobs:
         run: node busca_vagas/build_public_inhire.js
 
       - name: Validar a coleta da InHire
+        if: ${{ !((github.event_name == 'workflow_dispatch' && inputs.publish_linkedin_only) || (github.event_name == 'repository_dispatch' && github.event.action == 'linkedin_refresh')) }}
         continue-on-error: true
         shell: bash
         run: |
@@ -326,7 +335,17 @@ jobs:
           INFOJOBS_MAX_JOBS: "2000"
           INFOJOBS_MAX_SCROLLS: "0"
           JOBS_COLLECTION_CHECKPOINT_DIR: "jobs-dashboard/data/collection_checkpoints"
-        run: python jobs-dashboard/pipeline_fit.py --max-age-months 2
+          LINKEDIN_ONLY: ${{ (github.event_name == 'repository_dispatch' && github.event.action == 'linkedin_refresh') || (github.event_name == 'workflow_dispatch' && inputs.publish_linkedin_only) }}
+        run: |
+          set -euo pipefail
+          if [ "$LINKEDIN_ONLY" = "true" ]; then
+            echo "CATALOG_COLLECTION_SCOPE=partial:linkedin" >> "$GITHUB_ENV"
+            echo "Modo LinkedIn-only: consolidando o snapshot já coletado; os demais portais não serão consultados."
+            python jobs-dashboard/pipeline_fit.py --sources linkedin --max-age-months 2
+          else
+            echo "CATALOG_COLLECTION_SCOPE=full" >> "$GITHUB_ENV"
+            python jobs-dashboard/pipeline_fit.py --max-age-months 2
+          fi
 
       - name: Salvar checkpoints da coleta
         if: always()
@@ -380,6 +399,18 @@ jobs:
             git -C "$data_worktree" commit -m "Atualiza histórico do pipeline"
             git -C "$data_worktree" push origin HEAD:history-data
           fi
+
+      - name: Confirmar que o código da coleta ainda é o commit disparador
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          current_main_sha="$(git rev-parse origin/main)"
+          if [ "$current_main_sha" != "$GITHUB_SHA" ]; then
+            echo "ERRO: main avançou durante a coleta; recusando publicar um snapshot baseado em código defasado." >&2
+            exit 1
+          fi
+          echo "OK: a coleta será publicada a partir de $GITHUB_SHA."
 
       - name: Publicar snapshots no ramo dedicado
         shell: bash
@@ -441,7 +472,12 @@ jobs:
             echo "Nenhuma alteração para registrar."
           else
             git commit -m "Atualiza índice público de vagas [skip ci]"
-            git pull --rebase origin main
+            git fetch --depth=1 --no-tags origin +refs/heads/main:refs/remotes/origin/main
+            current_main_sha="$(git rev-parse origin/main)"
+            if [ "$current_main_sha" != "$GITHUB_SHA" ]; then
+              echo "ERRO: main avançou antes do commit de manutenção; não faremos rebase silencioso." >&2
+              exit 1
+            fi
             git push origin HEAD:main
           fi
 
@@ -462,4 +498,5 @@ jobs:
         uses: actions/deploy-pages@v4
         with:
           artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
+
 
