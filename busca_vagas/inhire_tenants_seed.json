@@ -744,6 +744,10 @@
     "tenantName": "Enjoei"
   },
   {
+    "slug": "envolti",
+    "tenantName": "envolti"
+  },
+  {
     "slug": "enzrossi",
     "tenantName": "EnzRossi"
   },
@@ -994,6 +998,10 @@
   {
     "slug": "grupocomolatti",
     "tenantName": "Grupo Comolatti"
+  },
+  {
+    "slug": "grupodaycoval",
+    "tenantName": "grupodaycoval"
   },
   {
     "slug": "grupoeximio",
