@@ -1760,6 +1760,10 @@
     "tenantName": "Prosper Tech Talents"
   },
   {
+    "slug": "pxcenter",
+    "tenantName": "pxcenter"
+  },
+  {
     "slug": "qeevo",
     "tenantName": "Qeevo"
   },
