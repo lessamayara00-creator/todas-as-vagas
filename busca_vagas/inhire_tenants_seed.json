@@ -368,6 +368,10 @@
     "tenantName": "Breezy Seguros"
   },
   {
+    "slug": "brick",
+    "tenantName": "brick"
+  },
+  {
     "slug": "bridge",
     "tenantName": "Bridge & Co."
   },
@@ -650,6 +654,10 @@
   {
     "slug": "dealersites",
     "tenantName": "Dealer Space"
+  },
+  {
+    "slug": "dealerspace",
+    "tenantName": "dealerspace"
   },
   {
     "slug": "deloitte",
@@ -1736,6 +1744,10 @@
     "tenantName": "plugin"
   },
   {
+    "slug": "plusoft",
+    "tenantName": "plusoft"
+  },
+  {
     "slug": "pmfo",
     "tenantName": "Portofino Multi    Family Office"
   },
@@ -1890,6 +1902,10 @@
   {
     "slug": "rnp",
     "tenantName": "Rede RNP"
+  },
+  {
+    "slug": "rochaebarcellos",
+    "tenantName": "rochaebarcellos"
   },
   {
     "slug": "rpo-abinbev",
